@@ -21,6 +21,8 @@ LATENT_DIM = 2
 
 
 class MRISlices(Dataset):
+    """Read a supplied OASIS split as float32 [1, 256, 256] MRI tensors in [0, 1]."""
+
     def __init__(self, split):
         directory = DATA_ROOT / f'keras_png_slices_{split}'
         self.files = sorted(directory.glob('case_*.nii.png'))
@@ -40,6 +42,8 @@ class MRISlices(Dataset):
 
 
 class VAE(nn.Module):
+    """Encode MRI slices as a two-dimensional Gaussian and decode sampled latents."""
+
     def __init__(self):
         super().__init__()
         # Spatial dimensions: 256 -> 128 -> 64 -> 32 -> 16.
@@ -62,27 +66,32 @@ class VAE(nn.Module):
         )
 
     def encode(self, images):
+        """Return posterior mean and log-variance, each shaped [B, LATENT_DIM]."""
         features = self.encoder(images)
         return self.mu(features), self.logvar(features)
 
     @staticmethod
     def reparameterise(mu, logvar):
+        """Sample z from the posterior while retaining gradients to its parameters."""
         # q(z|x) is a diagonal Gaussian; this sampling keeps gradients flowing.
         std = torch.exp(0.5 * logvar)
         epsilon = torch.randn_like(std)
         return mu + std * epsilon
 
     def decode(self, z):
+        """Map [B, LATENT_DIM] latents to [B, 1, 256, 256] images in [0, 1]."""
         features = self.decoder_input(z).reshape(-1, 128, 16, 16)
         return self.decoder(features)
 
     def forward(self, images):
+        """Return sampled reconstructions, posterior means and log-variances."""
         mu, logvar = self.encode(images)
         z = self.reparameterise(mu, logvar)
         return self.decode(z), mu, logvar
 
 
 def vae_loss(reconstructions, images, mu, logvar):
+    """Return batch-mean reconstruction error plus KL divergence to N(0, I)."""
     # Sum squared pixel errors per image, then average over the batch.
     # MSE corresponds to a fixed-variance Gaussian reconstruction model.
     reconstruction = F.mse_loss(reconstructions, images, reduction='sum')
@@ -92,6 +101,7 @@ def vae_loss(reconstructions, images, mu, logvar):
 
 
 def run_epoch(model, loader, device, optimiser=None):
+    """Return mean loss per image; train only when an optimiser is supplied."""
     training = optimiser is not None
     model.train(training)
     total_loss = 0.0
@@ -112,12 +122,14 @@ def run_epoch(model, loader, device, optimiser=None):
 
 
 def grayscale_image(tensor):
+    """Convert one [1, H, W] tensor in [0, 1] to a grayscale Pillow image."""
     pixels = tensor.detach().cpu().squeeze(0).clamp(0, 1)
     return Image.fromarray((pixels.numpy() * 255).round().astype(np.uint8))
 
 
 @torch.no_grad()
 def save_reconstructions(model, dataset, device, path):
+    """Save test originals and posterior-mean reconstructions as a paired PNG."""
     model.eval()
     # Six different test cases, using a central slice rather than blank edges.
     files_by_case = {}
@@ -150,6 +162,7 @@ def save_reconstructions(model, dataset, device, path):
 
 @torch.no_grad()
 def save_manifold(model, device, path):
+    """Save an 11x11 grid decoded from latent coordinates in [-3, 3] on each axis."""
     model.eval()
     # Each tile is decoder(z1, z2), with no dimensionality reduction.
     coordinates = torch.linspace(-3, 3, 11)
@@ -172,6 +185,7 @@ def save_manifold(model, device, path):
 
 
 def main():
+    """Train and validate the VAE, then save test reconstructions and its manifold."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--epochs', type=int, default=30)
     parser.add_argument('--batch-size', type=int, default=64)

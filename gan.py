@@ -24,6 +24,8 @@ LATENT_DIM = 128
 
 
 class MRISlices(Dataset):
+    """Read training slices 8-23 as float32 [1, 256, 256] MRI tensors in [-1, 1]."""
+
     def __init__(self):
         self.files = []
         for path in sorted(TRAIN_DIR.glob('case_*.nii.png')):
@@ -46,6 +48,8 @@ class MRISlices(Dataset):
 
 
 class Generator(nn.Module):
+    """Map [B, 128, 1, 1] noise to [B, 1, 256, 256] MRI samples using a DCGAN."""
+
     def __init__(self):
         super().__init__()
         # A latent noise vector becomes a 4x4 feature map, then doubles in size.
@@ -71,6 +75,8 @@ class Generator(nn.Module):
 
 
 class Discriminator(nn.Module):
+    """Map each [1, 256, 256] image to one raw real-versus-fake logit."""
+
     def __init__(self):
         super().__init__()
         # Strided convolutions halve the resolution: 256 -> ... -> 4.
@@ -97,6 +103,7 @@ class Discriminator(nn.Module):
 
 
 def initialise_weights(module):
+    """Apply conventional DCGAN convolution and BatchNorm initialisation in place."""
     if isinstance(module, (nn.Conv2d, nn.ConvTranspose2d)):
         nn.init.normal_(module.weight, mean=0.0, std=0.02)
     elif isinstance(module, nn.BatchNorm2d):
@@ -105,6 +112,7 @@ def initialise_weights(module):
 
 
 def train_epoch(generator, discriminator, loader, device, optimiser_g, optimiser_d):
+    """Alternate D/G updates and return image-weighted mean (G loss, D loss)."""
     generator.train()
     discriminator.train()
     criterion = nn.BCEWithLogitsLoss()
@@ -142,6 +150,7 @@ def train_epoch(generator, discriminator, loader, device, optimiser_g, optimiser
 
 
 def display_image(sample, size=256):
+    """Convert one generated [1, 256, 256] tensor in [-1, 1] to a display image."""
     # Scaling back to [0, 1] is for display only, never for discriminator input.
     pixels = ((sample.detach().cpu()[0] + 1) / 2).clamp(0, 1)
     image = Image.fromarray((pixels.numpy() * 255).round().astype(np.uint8))
@@ -152,6 +161,7 @@ def display_image(sample, size=256):
 
 @torch.no_grad()
 def save_samples(generator, device, path):
+    """Save a 6x6 PNG of samples from 36 fresh independent latent vectors."""
     generator.eval()
     # Independent latent vectors for all 36 tiles; no image is copied to fill a grid.
     noise = torch.randn(36, LATENT_DIM, 1, 1, device=device)
@@ -167,6 +177,7 @@ def save_samples(generator, device, path):
 
 
 def save_progress(stages, path):
+    """Save rows of (epoch, eight fixed-noise samples) collected during training."""
     tile, left, top = 128, 120, 54
     canvas = Image.new('L', (left + 8 * tile, top + len(stages) * tile), color=255)
     draw = ImageDraw.Draw(canvas)
@@ -183,6 +194,7 @@ def save_progress(stages, path):
 
 
 def save_losses(generator_losses, discriminator_losses, path):
+    """Plot matching sequences of average G/D losses, with one value per epoch."""
     # A simple line plot drawn with Pillow avoids additional plotting dependencies.
     canvas = Image.new('RGB', (960, 540), 'white')
     draw = ImageDraw.Draw(canvas)
@@ -216,6 +228,7 @@ def save_losses(generator_losses, discriminator_losses, path):
 
 
 def main():
+    """Train and save the GAN, or load its generator to produce fresh samples."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--generate-only', action='store_true')
     parser.add_argument('--epochs', type=int, default=60)

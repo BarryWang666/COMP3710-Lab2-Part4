@@ -1,0 +1,12 @@
+# Python bytecode and local OS/editor artifacts
+__pycache__/
+*.py[cod]
+.DS_Store
+*.swp
+*.swo
+*~
+
+# Model checkpoints and Slurm/runtime output; keep results/*.png tracked.
+*.pt
+*.pth
+*.out

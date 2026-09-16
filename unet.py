@@ -29,6 +29,12 @@ COLOURS = np.array([[0, 0, 0], [0, 160, 230], [240, 160, 0], [210, 60, 170]],
 
 
 class OASISSegmentation(Dataset):
+    """Pair a supplied MRI/mask split and reject missing pairs or unknown labels.
+
+    Each sample returns a float32 [1, 256, 256] MRI in [0, 1] and a
+    torch.long [256, 256] mask with class indices 0-3.
+    """
+
     def __init__(self, split):
         image_dir = DATA_ROOT / f'keras_png_slices_{split}'
         mask_dir = DATA_ROOT / f'keras_png_slices_seg_{split}'
@@ -65,6 +71,8 @@ class OASISSegmentation(Dataset):
 
 
 class DoubleConv(nn.Module):
+    """Extract features with two convolution/BatchNorm/ReLU stages at one scale."""
+
     def __init__(self, in_channels, out_channels):
         super().__init__()
         self.layers = nn.Sequential(
@@ -79,6 +87,8 @@ class DoubleConv(nn.Module):
 
 
 class UpBlock(nn.Module):
+    """Upsample decoder features and combine them with a matching encoder skip."""
+
     def __init__(self, in_channels, out_channels):
         super().__init__()
         self.up = nn.ConvTranspose2d(in_channels, out_channels, 2, stride=2)
@@ -91,6 +101,8 @@ class UpBlock(nn.Module):
 
 
 class UNet(nn.Module):
+    """Map [B, 1, 256, 256] MRI slices to [B, 4, 256, 256] categorical logits."""
+
     def __init__(self):
         super().__init__()
         self.enc1 = DoubleConv(1, 32)
@@ -121,6 +133,7 @@ class UNet(nn.Module):
 
 
 def segmentation_loss(logits, targets):
+    """Combine cross-entropy and equal-class soft Dice using integer target masks."""
     # Compute loss in float32 even when convolutions use mixed precision.
     logits = logits.float()
     cross_entropy = F.cross_entropy(logits, targets)
@@ -135,6 +148,10 @@ def segmentation_loss(logits, targets):
 
 
 def dice_from_confusion(confusion):
+    """Return four DSC values from a true-row/predicted-column count matrix.
+
+    A class absent from both predictions and targets has undefined DSC (NaN).
+    """
     # Rows are true classes; columns are predicted classes.
     intersection = confusion.diag().double()
     target_count = confusion.sum(dim=1).double()
@@ -146,6 +163,7 @@ def dice_from_confusion(confusion):
 
 
 def train_epoch(model, loader, device, optimiser, scaler):
+    """Train one epoch with CUDA mixed precision when available; return mean loss."""
     model.train()
     total_loss = 0.0
     for images, targets in loader:
@@ -163,6 +181,7 @@ def train_epoch(model, loader, device, optimiser, scaler):
 
 @torch.no_grad()
 def evaluate(model, loader, device):
+    """Return mean loss and four CPU DSC values from counts across the full split."""
     model.eval()
     total_loss = 0.0
     confusion = torch.zeros(NUM_CLASSES, NUM_CLASSES, dtype=torch.int64, device=device)
@@ -180,6 +199,7 @@ def evaluate(model, loader, device):
 
 @torch.no_grad()
 def save_segmentation(model, dataset, device, path):
+    """Save test MRI, ground-truth and argmax masks using a shared class palette."""
     model.eval()
     # Show central slices from four different test cases, chosen without scores.
     cases = {}
@@ -214,6 +234,7 @@ def save_segmentation(model, dataset, device, path):
 
 
 def main():
+    """Train and select by minimum validation DSC, or evaluate a saved checkpoint."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--eval-only', action='store_true')
     parser.add_argument('--epochs', type=int, default=20)
